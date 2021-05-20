@@ -308,9 +308,7 @@ handle_unary(Ctx, Message, State=#state{unary_interceptor=UnaryInterceptor,
           end) of
         {ok, Response, Ctx2} ->
             State1 = from_ctx(Ctx2),
-            State2 = send(false, Response, State1),
-            {ok, State3} = end_stream(State2),
-            State3;
+            send(false, Response, State1);
         E={grpc_error, _} ->
             throw(E);
         E={grpc_extended_error, _} ->
