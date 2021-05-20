@@ -105,6 +105,7 @@ init(ConnPid, StreamId, [Socket, ServicesTable, AuthFun, UnaryInterceptor,
     {ok, State}.
 
 on_receive_headers(Headers, State=#state{ctx=_Ctx}) ->
+    lager:info("received headers ~p", [Headers]),
     %% proplists:get_value(<<":method">>, Headers) =:= <<"POST">>,
     Metadata = grpcbox_utils:headers_to_metadata(Headers),
     Ctx = case parse_options(<<"grpc-timeout">>, Headers) of
@@ -250,6 +251,7 @@ on_receive_data(_, State=#state{method=undefined}) ->
 on_receive_data(Bin, State=#state{request_encoding=Encoding,
                                   buffer=Buffer}) ->
     try
+
         {NewBuffer, Messages} = grpcbox_frame:split(<<Buffer/binary, Bin/binary>>, Encoding),
         State1 = lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
                                      StateAcc1 = handle_message(EncodedMessage, StateAcc),
@@ -273,6 +275,7 @@ handle_message(EncodedMessage, State=#state{ctx=Ctx,
                                                            output={_Output, OutputStream}}}) ->
     try Proto:decode_msg(EncodedMessage, Input) of
         Message ->
+            lager:info("received message ~p", [Message]),
             State1=#state{ctx=Ctx1} =
                 stats_handler(Ctx, in_payload, #{uncompressed_size => erlang:external_size(Message),
                                                  compressed_size => size(EncodedMessage)}, State),
@@ -315,6 +318,7 @@ handle_unary(Ctx, Message, State=#state{unary_interceptor=UnaryInterceptor,
     end.
 
 on_end_stream(State) ->
+    lager:info("received end stream", []),
     on_end_stream_(State),
     {ok, State}.
 
@@ -452,6 +456,7 @@ send(End, Message, State=#state{ctx=Ctx,
                                                output={Output, _}}}) ->
     BodyToSend = Proto:encode_msg(Message, Output),
     OutFrame = grpcbox_frame:encode(Encoding, BodyToSend),
+    lager:info("sending body on stream ~p: ~p", [self(), Message]),
     ok = h2_connection:send_body(ConnPid, StreamId, OutFrame, [{send_end_stream, End}]),
     stats_handler(Ctx, out_payload, #{uncompressed_size => erlang:external_size(Message),
                                       compressed_size => size(BodyToSend)}, State).
