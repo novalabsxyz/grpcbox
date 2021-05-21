@@ -2,7 +2,7 @@
 [{<<"acceptor_pool">>,{pkg,<<"acceptor_pool">>,<<"1.0.0">>},0},
  {<<"chatterbox">>,
   {git,"https://github.com/andymck/chatterbox",
-       {ref,"d6dad4a42383c65689cc67d9ae7e3032c326f39c"}},
+       {ref,"0ec6adc15d4575477fbd293e9f57204d0911a79e"}},
   0},
  {<<"ctx">>,{pkg,<<"ctx">>,<<"0.6.0">>},0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},1},

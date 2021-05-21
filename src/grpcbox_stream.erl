@@ -348,6 +348,7 @@ end_stream(State) ->
     end_stream(?GRPC_STATUS_OK, <<>>, State).
 
 end_stream(Status, Message, State=#state{headers_sent=false}) ->
+    lager:info("ending stream but first sending headers", []),
     end_stream(Status, Message, send_headers(State));
 end_stream(_Status, _Message, State=#state{trailers_sent=true}) ->
     {ok, State};
@@ -355,6 +356,7 @@ end_stream(Status, Message, State=#state{connection_pid=ConnPid,
                                          stream_id=StreamId,
                                          ctx=Ctx,
                                          resp_trailers=Trailers}) ->
+    lager:info("ending stream", []),
     EncodedTrailers = grpcbox_utils:encode_headers(Trailers),
     h2_connection:send_trailers(ConnPid, StreamId, [{<<"grpc-status">>, Status},
                                                     {<<"grpc-message">>, Message} | EncodedTrailers],
@@ -380,6 +382,7 @@ send_headers(Metadata, State=#state{connection_pid=ConnPid,
                                     stream_id=StreamId,
                                     resp_headers=Headers,
                                     headers_sent=false}) ->
+    lager:info("sending headers on stream ~p: ~p", [self(), Metadata]),
     MdHeaders = grpcbox_utils:encode_headers(Metadata),
     h2_connection:send_headers(ConnPid, StreamId, Headers ++ MdHeaders, [{send_end_stream, false}]),
     State#state{headers_sent=true}.
