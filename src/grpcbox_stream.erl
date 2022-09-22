@@ -198,24 +198,31 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
                   StreamInterceptor(Ref, State, ServerInfo, fun Module:Function/2)
           end) of
         {ok, State1} ->
+            %% MARKER
+            lager:warning("RETURNING STATE 1", []),
             State1;
         {ok, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
+            lager:warning("RETURNING OK/START 1", []),
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
             _ = stop_stream(?STREAM_CLOSED, State2),
+            lager:warning("RETURNING OK/STATE FROM STOP 1", []),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
+            lager:warning("RETURNING OK/STATE FROM STOP/RESP 1", []),
             {ok, State3};
         E={grpc_error, _} ->
+            lager:warning("THROW GRPC ERROR 1", []),
             throw(E);
         E={grpc_extended_error, _} ->
+            lager:warning("THROW GRPC EXTENDED ERROR 1", []),
             throw(E)
     end;
 
@@ -235,26 +242,32 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
                   StreamInterceptor(Ref, State, ServerInfo, fun Module:Function/2)
           end) of
         {ok, State1} ->
+            lager:warning("RETURNING STATE 2", []),
             State1;
         {ok, Response, State1} ->
+            lager:warning("RETURNING SEND/FALSE 2", []),
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
             _ = stop_stream(?STREAM_CLOSED, State2),
+            lager:warning("RETURNING OK/STATE FOR STOP 2", []),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
+            lager:warning("RETURNING OK/STATE FOR STOP/RESP 2", []),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
             {ok, State1} = end_stream(Status, Message, State),
             _ = stop_stream(?STREAM_CLOSED, State1),
+            lager:warning("GRPC ERROR 2", []),
             {ok, State1};
         {grpc_extended_error, #{status := Status, message := Message} = ErrorData} ->
             State1 = add_trailers_from_error_data(ErrorData, State),
             {ok, State2} = end_stream(Status, Message, State1),
             _ = stop_stream(?STREAM_CLOSED, State2),
+            lager:warning("GRPC EXTENDED ERROR 2", []),
             {ok, State2}
     end.
 
@@ -478,9 +491,11 @@ add_trailers(Ctx, Trailers=#{}) ->
     ctx_with_stream(Ctx, State#state{resp_trailers=maps:to_list(Trailers) ++ RespTrailers}).
 
 update_headers(Headers, State=#state{resp_headers=RespHeaders}) ->
+    lager:warning("UPDATING HEADERS", []),
     State#state{resp_headers=RespHeaders ++ Headers}.
 
 update_trailers(Trailers, State=#state{resp_trailers=RespTrailers}) ->
+    lager:warning("UPDATING TRAILERS", []),
     State#state{resp_trailers=RespTrailers ++ Trailers}.
 
 send(End, Message, State=#state{headers_sent=false}) ->
