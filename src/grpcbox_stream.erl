@@ -102,6 +102,7 @@ init(ConnPid, StreamId, [Socket, ServicesTable, AuthFun, UnaryInterceptor,
                    socket=Socket,
                    handler=self(),
                    stats_handler=StatsHandler},
+    lager:warning("INITIALIZING STREAM", []),
     {ok, State}.
 
 on_receive_headers(Headers, State=#state{ctx=_Ctx}) ->
@@ -508,6 +509,7 @@ send(End, Message, State=#state{ctx=Ctx,
                                 method=#method{proto=Proto,
                                                input={_Input, _},
                                                output={Output, _}}}) ->
+    lager:warning("SENDING MESSAGE", []),
     BodyToSend = Proto:encode_msg(Message, Output),
     OutFrame = grpcbox_frame:encode(Encoding, BodyToSend),
     ok = h2_connection:send_body(ConnPid, StreamId, OutFrame, [{send_end_stream, End}]),
