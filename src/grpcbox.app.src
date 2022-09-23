@@ -5,6 +5,7 @@
   {mod,{grpcbox_app,[]}},
   {applications,[kernel,
                  stdlib,
+                 lager,
                  chatterbox,
                  acceptor_pool,
                  gproc,

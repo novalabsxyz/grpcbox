@@ -1,7 +1,6 @@
 -module(grpcbox_stream).
 
 -include_lib("chatterbox/include/http2.hrl").
--include_lib("kernel/include/logger.hrl").
 -include("grpcbox.hrl").
 
 -behaviour(h2_stream).
@@ -102,7 +101,6 @@ init(ConnPid, StreamId, [Socket, ServicesTable, AuthFun, UnaryInterceptor,
                    socket=Socket,
                    handler=self(),
                    stats_handler=StatsHandler},
-    lager:warning("INITIALIZING STREAM", []),
     {ok, State}.
 
 on_receive_headers(Headers, State=#state{ctx=_Ctx}) ->
@@ -199,31 +197,24 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
                   StreamInterceptor(Ref, State, ServerInfo, fun Module:Function/2)
           end) of
         {ok, State1} ->
-            %% MARKER
-            lager:warning("RETURNING STATE 1", []),
             State1;
         {ok, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
-            lager:warning("RETURNING OK/START 1", []),
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
             _ = stop_stream(?STREAM_CLOSED, State2),
-            lager:warning("RETURNING OK/STATE FROM STOP 1", []),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
-            lager:warning("RETURNING OK/STATE FROM STOP/RESP 1", []),
             {ok, State3};
         E={grpc_error, _} ->
-            lager:warning("THROW GRPC ERROR 1", []),
             throw(E);
         E={grpc_extended_error, _} ->
-            lager:warning("THROW GRPC EXTENDED ERROR 1", []),
             throw(E)
     end;
 
@@ -243,10 +234,8 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
                   StreamInterceptor(Ref, State, ServerInfo, fun Module:Function/2)
           end) of
         {ok, State1} ->
-            lager:warning("RETURNING STATE 2", []),
             State1;
         {ok, Response, State1} ->
-            lager:warning("RETURNING SEND/FALSE 2", []),
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
@@ -257,18 +246,15 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
-            lager:warning("RETURNING OK/STATE FOR STOP/RESP 2", []),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
             {ok, State1} = end_stream(Status, Message, State),
             _ = stop_stream(?STREAM_CLOSED, State1),
-            lager:warning("GRPC ERROR 2", []),
             {ok, State1};
         {grpc_extended_error, #{status := Status, message := Message} = ErrorData} ->
             State1 = add_trailers_from_error_data(ErrorData, State),
             {ok, State2} = end_stream(Status, Message, State1),
             _ = stop_stream(?STREAM_CLOSED, State2),
-            lager:warning("GRPC EXTENDED ERROR 2", []),
             {ok, State2}
     end.
 
@@ -302,10 +288,9 @@ on_receive_data(Bin, State=#state{request_encoding=Encoding,
             {ok, State3} = end_stream(Status, Message, State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
-        C:E:S ->
+        _C:_E:_S ->
             %% if we dont catch exceptions here, it ends up taking the h2 connection down
             %% and thus one stream going down pulls ev thing down
-            ?LOG_WARNING("crash: class=~p exception=~p stacktrace=~p", [C, E, S]),
             {ok, State2} = end_stream(?GRPC_STATUS_UNKNOWN, <<>>, State),
             _ = stop_stream(?INTERNAL_ERROR, State2),
             {ok, State2}
@@ -386,11 +371,14 @@ stats_handler(Ctx, Event, Stats, State=#state{stats_handler=StatsHandler,
                 stats=StatsState1}.
 
 end_stream(State) ->
+    lager:warning("PLEASE CLOSE STREAM", []),
     end_stream(?GRPC_STATUS_OK, <<>>, State).
 
 end_stream(Status, Message, State=#state{headers_sent=false}) ->
+    lager:warning("SEND HEADERS AND THEN END", []),
     end_stream(Status, Message, send_headers(State));
 end_stream(_Status, _Message, State=#state{trailers_sent=true}) ->
+    lager:warning("JUST END; WE'RE DONE HERE"),
     {ok, State};
 end_stream(Status, Message, State=#state{connection_pid=ConnPid,
                                          stream_id=StreamId,
@@ -402,11 +390,13 @@ end_stream(Status, Message, State=#state{connection_pid=ConnPid,
                                 [{send_end_stream, true}]),
     Ctx1 = ctx:with_value(Ctx, grpc_server_status, grpcbox_utils:status_to_string(Status)),
     State1 = stats_handler(Ctx1, rpc_end, {}, State),
+    lager:warning("SEND TRAILERS AND EXIT", []),
     {ok, State1#state{trailers_sent=true}}.
 
 stop_stream(Status, State=#state{ connection_pid=ConnPid,
                                  stream_id=StreamId}) ->
     h2_connection:rst_stream(ConnPid, StreamId, Status),
+    lager:warning("STOP H2 STREAM", []),
     {ok, State}.
 
 set_trailers(Ctx, Trailers) ->
@@ -479,8 +469,7 @@ handle_info(Msg, State=#state{method=#method{module=Module, function=Function}})
                         State
                 end
         end
-    catch C:E:S ->
-        ?LOG_WARNING("crash: class=~p exception=~p stacktrace=~p", [C, E, S]),
+    catch _C:_E:_S ->
         {ok, State2} = end_stream(?GRPC_STATUS_UNKNOWN, <<>>, State),
         _ = stop_stream(?INTERNAL_ERROR, State2),
         State2
@@ -509,7 +498,6 @@ send(End, Message, State=#state{ctx=Ctx,
                                 method=#method{proto=Proto,
                                                input={_Input, _},
                                                output={Output, _}}}) ->
-    lager:warning("SENDING MESSAGE", []),
     BodyToSend = Proto:encode_msg(Message, Output),
     OutFrame = grpcbox_frame:encode(Encoding, BodyToSend),
     ok = h2_connection:send_body(ConnPid, StreamId, OutFrame, [{send_end_stream, End}]),
@@ -608,8 +596,7 @@ maybe_init_handler_state(Module, Function, State)->
             true -> Module:init(Function, State);
             false -> State
         end
-    catch C:E:S ->
-        ?LOG_WARNING("crash: class=~p exception=~p stacktrace=~p", [C, E, S]),
+    catch _C:_E:_S ->
         {ok, State2} = end_stream(?GRPC_STATUS_UNKNOWN, <<>>, State),
         _ = stop_stream(?INTERNAL_ERROR, State2),
         State2
