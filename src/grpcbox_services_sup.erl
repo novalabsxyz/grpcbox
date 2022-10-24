@@ -49,6 +49,9 @@ init([ServerOpts, GrpcOpts, ListenOpts, PoolOpts, TransportOpts, ServiceSupName]
     %% unique name for pool based on the ip and port it will listen on
     Name = pool_name(ListenOpts),
 
+    %% make the ets table to be used to track the number of active connections per pool
+    ok = make_pool_conn_cache(),
+
     RestartStrategy = #{strategy => rest_for_one, intensity => 50, period => 2},
     Pool = #{id => grpcbox_pool,
              start => {grpcbox_pool, start_link, [Name, chatterbox:settings(server, ServerOpts),
@@ -188,3 +191,19 @@ ensure_map(S) when is_map(S)->
     S;
 ensure_map(S) when is_list(S)->
     maps:from_list(S).
+
+%% make an ets table to track the number of active connections per pool
+%% a counter will be added per pool and increment and decremented
+%% with each new and terminating connection
+%% table needs to be public to allow the grpcbox_pool to update
+-spec make_pool_conn_cache() -> ok.
+make_pool_conn_cache() ->
+    catch ets:delete(?ACTIVE_CONNS_PER_POOL_TABLE),
+    _ = ets:new(
+        ?ACTIVE_CONNS_PER_POOL_TABLE,
+        [
+            named_table,
+            public
+        ]
+    ),
+    ok.

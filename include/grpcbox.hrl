@@ -34,3 +34,5 @@
 
 -define(GRPC_ERROR(Status, Message), {grpc_error, {Status, Message}}).
 -define(THROW(Status, Message), throw(?GRPC_ERROR(Status, Message))).
+
+-define(ACTIVE_CONNS_PER_POOL_TABLE, active_conns_per_pool_table).
