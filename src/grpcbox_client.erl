@@ -5,7 +5,9 @@
 
 -module(grpcbox_client).
 
--export([unary/6,
+-export([connect/3,
+        
+         unary/6,
          unary/5,
          stream/4,
          stream/5,
@@ -43,6 +45,9 @@
               unary_interceptor/0,
               stream_interceptor/0,
               interceptor/0]).
+
+connect(ChannelName, Endpoints, Options) ->
+    grpcbox_channel_sup:start_child(ChannelName, Endpoints, Options).
 
 get_channel(Options, Type) ->
     Channel = maps:get(channel, Options, default_channel),
