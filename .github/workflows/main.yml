@@ -15,8 +15,8 @@ jobs:
 
     strategy:
       matrix:
-        otp_version: ['24.1.2', '23.3.4.2', '22.3.4.20']
-        os: [ubuntu-18.04]
+        otp_version: ['24.1.2', '23.3.4.2']
+        os: [ubuntu-20.04]
 
     steps:
     - uses: actions/checkout@v2
