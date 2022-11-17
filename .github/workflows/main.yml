@@ -9,7 +9,7 @@ on:
       - 'master'
 
 jobs:
-  build23+:
+  build23andnewer:
     name: Test on OTP ${{ matrix.otp_version }} and ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
 
@@ -38,7 +38,7 @@ jobs:
       with:
         file: _build/test/covertool/grpcbox.covertool.xml
 
-  build22-:
+  build22andolder:
     name: Test on OTP ${{ matrix.otp_version }} and ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
 
