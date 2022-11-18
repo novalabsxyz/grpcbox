@@ -15,10 +15,10 @@
 
 -type client_stream_callback_data() :: term().
 
--callback(init(pid(), non_neg_integer(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
--callback(handle_message(term(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
--callback(handle_headers(map(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
--callback(handle_trailers(binary(), term(), map(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+-callback(init(ClientPid::pid(), StreamId::non_neg_integer(), term()) -> {ok, client_stream_callback_data()}).
+-callback(handle_message(Message::term(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+-callback(handle_headers(Metadata::map(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+-callback(handle_trailers(Status::binary(), Message::term(), Metadata::map(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
 -callback(handle_eos(client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
 
 -define(headers(Scheme, Host, Path, Encoding, MessageType, MD), [{<<":method">>, <<"POST">>},
@@ -41,6 +41,7 @@ new_stream(Ctx, Channel, Path, Def=#grpcbox_def{service=Service,
                      encoding := DefaultEncoding,
                      stats_handler := StatsHandler}} ->
             Encoding = maps:get(encoding, Options, DefaultEncoding),
+            Callback = callback_module(Options),
             RequestHeaders = ?headers(Scheme, Authority, Path, encoding_to_binary(Encoding),
                                       MessageType, metadata_headers(Ctx)),
             case h2_connection:new_stream(Conn, ?MODULE, [#{service => Service,
@@ -50,6 +51,7 @@ new_stream(Ctx, Channel, Path, Def=#grpcbox_def{service=Service,
                                                             buffer => <<>>,
                                                             stats_handler => StatsHandler,
                                                             stats => #{},
+                                                            callback_module => Callback,
                                                             client_pid => self()}], self()) of
                 {error, _Code} = Err ->
                     Err;
@@ -77,6 +79,7 @@ send_request(Ctx, Channel, Path, Input, #grpcbox_def{service=Service,
                      encoding := DefaultEncoding,
                      stats_handler := StatsHandler}} ->
             Encoding = maps:get(encoding, Options, DefaultEncoding),
+            Callback = callback_module(Options),
             Body = grpcbox_frame:encode(Encoding, MarshalFun(Input)),
             Headers = ?headers(Scheme, Authority, Path, encoding_to_binary(Encoding), MessageType, metadata_headers(Ctx)),
 
@@ -91,6 +94,7 @@ send_request(Ctx, Channel, Path, Input, #grpcbox_def{service=Service,
                                                                           buffer => <<>>,
                                                                           stats_handler => StatsHandler,
                                                                           stats => #{},
+                                                                          callback_module => Callback,
                                                                           client_pid => self()}], Headers, [], self()) of
                 {error, _Code} = Err ->
                     Err;
@@ -144,13 +148,12 @@ metadata_headers(Ctx) ->
 
 %% callbacks
 
-init(ConnectionPid, StreamId, [_, State=#{path := Path, client_pid := ClientPid}]) ->
-    {CallbackModule, CallbackInitArgs} = maps:get(callback_module, State, {grpcbox_client_stream_callback, #{client_pid => ClientPid}}),
+init(ConnectionPid, StreamId, [_, State=#{path := Path, callback_module := {CallbackModule, CallbackInitArgs}}]) ->
     _ = process_flag(trap_exit, true),
     Ctx1 = ctx:with_value(ctx:new(), grpc_client_method, Path),
     State1 = stats_handler(Ctx1, rpc_begin, {}, State),
     {ok, CallbackData} = init_stream_callback(CallbackModule, CallbackInitArgs, ConnectionPid, StreamId), 
-    {ok, State1#{stream_id => StreamId, callback_module => {CallbackModule, CallbackInitArgs}, callback_data => CallbackData}};
+    {ok, State1#{stream_id => StreamId, callback_data => CallbackData}};
 init(_, _, State) ->
     {ok, State}.
 
@@ -201,6 +204,11 @@ handle_info(_, State) ->
     State.
 
 %%
+
+callback_module(#{callback_module := CallbackModule}) ->
+    CallbackModule;
+callback_module(_) ->
+    {grpcbox_client_stream_callback, #{client_pid => self()}}.
 
 init_stream_callback(CallbackModule, CallbackInitArgs, ConnectionPid, StreamId) ->
     CallbackModule:init(ConnectionPid, StreamId, CallbackInitArgs).
