@@ -33,6 +33,7 @@ all() ->
      stream_interceptor,
      bidirectional,
      client_stream,
+     client_stream_callback,
      client_stream_garbage_collect_streams,
      compression,
      stats_handler,
@@ -212,6 +213,14 @@ init_per_testcase(bidirectional, Config) ->
     application:ensure_all_started(grpcbox),
     Config;
 init_per_testcase(client_stream, Config) ->
+    application:set_env(grpcbox, client, #{channels => [{default_channel,
+                                                         [{http, "localhost", 8080, []}], #{}}]}),
+    application:set_env(grpcbox, servers,
+                        [#{grpc_opts => #{service_protos => [route_guide_pb],
+                                          services => #{'routeguide.RouteGuide' => routeguide_route_guide}}}]),
+    application:ensure_all_started(grpcbox),
+    Config;
+init_per_testcase(client_stream_callback, Config) ->
     application:set_env(grpcbox, client, #{channels => [{default_channel,
                                                          [{http, "localhost", 8080, []}], #{}}]}),
     application:set_env(grpcbox, servers,
@@ -582,6 +591,28 @@ client_stream(_Config) ->
     ?assertMatch(ok, grpcbox_client:close_send(S)),
     ?assertMatch({ok, #{point_count := 2}}, grpcbox_client:recv_data(S)).
 %% TODO: add tests to ensure stream pids are gone and that accidental recvs and such after a close don't hang
+
+client_stream_callback(_Config) ->
+    Ref = make_ref(),
+    {ok, S} = routeguide_route_guide_client:record_route(ctx:new(), #{callback_module => {test_client_stream_callback, #{ref => Ref, reply_to => self()}}}),
+    ok = grpcbox_client:send(S, #{latitude => 409146138, longitude => -746188906}),
+    ok = grpcbox_client:send(S, #{latitude => 234818903, longitude => -823423910}),
+    ?assertMatch(ok, grpcbox_client:close_send(S)),
+    receive
+        {data, R, Data} ->
+            ?assertEqual(Ref, R),
+            ?assertMatch(#{point_count := 2}, Data)
+    after 1000 ->
+        ?assert(timeout)
+    end.
+
+unary(_Channel) ->
+    Point = #{latitude => 409146138, longitude => -746188906},
+    {ok, Feature, _} = routeguide_route_guide_client:get_feature(Point),
+    ?assertEqual(#{location =>
+                       #{latitude => 409146138, longitude => -746188906},
+                   name =>
+                       <<"Berkshire Valley Management Area Trail, Jefferson, NJ, USA">>}, Feature).
 
 unary_client_interceptor(_Config) ->
     %% client side interceptor replaces the point with lat 30 and long 90
