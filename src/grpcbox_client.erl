@@ -27,7 +27,8 @@
 -include("grpcbox.hrl").
 
 -type options() :: #{channel => grpcbox_channel:t(),
-                     encoding => grpcbox:encoding()}.
+                     encoding => grpcbox:encoding(),
+                     callback_module => {module(), any()}}.
 
 -type unary_interceptor() :: term().
 -type stream_interceptor() :: term().
