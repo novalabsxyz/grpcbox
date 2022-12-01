@@ -606,14 +606,6 @@ client_stream_callback(_Config) ->
         ?assert(timeout)
     end.
 
-unary(_Channel) ->
-    Point = #{latitude => 409146138, longitude => -746188906},
-    {ok, Feature, _} = routeguide_route_guide_client:get_feature(Point),
-    ?assertEqual(#{location =>
-                       #{latitude => 409146138, longitude => -746188906},
-                   name =>
-                       <<"Berkshire Valley Management Area Trail, Jefferson, NJ, USA">>}, Feature).
-
 unary_client_interceptor(_Config) ->
     %% client side interceptor replaces the point with lat 30 and long 90
     Point = #{latitude => 409146138, longitude => -746188906},
