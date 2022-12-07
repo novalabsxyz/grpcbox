@@ -293,7 +293,7 @@ on_receive_data(Bin, State=#state{request_encoding=Encoding,
             State2 = add_trailers_from_error_data(ErrorData, State),
             {ok, State3} = end_stream(Status, Message, State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
-            lager:warning("GRPCBOX: CATCH IN ON_RECEIVE_DATA THROW-GRPC-ERROR-EXTENDED", []
+            lager:warning("GRPCBOX: CATCH IN ON_RECEIVE_DATA THROW-GRPC-ERROR-EXTENDED", []),
             {ok, State3};
         _C:_E:_S ->
             %% if we dont catch exceptions here, it ends up taking the h2 connection down
