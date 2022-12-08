@@ -300,7 +300,7 @@ on_receive_data(Bin, State=#state{request_encoding=Encoding,
             %% and thus one stream going down pulls ev thing down
             {ok, State2} = end_stream(?GRPC_STATUS_UNKNOWN, <<>>, State),
             _ = stop_stream(?INTERNAL_ERROR, State2),
-            lager:warning("GRPCBOX: OTHER CATCH IN ON_RECEIVE_DATA", []),
+            lager:warning("GRPCBOX: OTHER CATCH IN ON_RECEIVE_DATA: ~p:~p:~p", [_C, _E, _S]),
             {ok, State2}
     end.
 
