@@ -201,16 +201,16 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
         {ok, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-%%            _ = stop_stream(?STREAM_CLOSED, State3),
+            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-%%            _ = stop_stream(?STREAM_CLOSED, State2),
+            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-%%            _ = stop_stream(?STREAM_CLOSED, State3),
+            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         E={grpc_error, _} ->
             throw(E);
@@ -241,13 +241,13 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-%%            _ = stop_stream(?STREAM_CLOSED, State2),
+            _ = stop_stream(?STREAM_CLOSED, State2),
             lager:warning("GRPCBOX: RETURNING OK/STATE FOR STOP 1", []),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-%%            _ = stop_stream(?STREAM_CLOSED, State3),
+            _ = stop_stream(?STREAM_CLOSED, State3),
             lager:warning("GRPCBOX: RETURNING OK/STATE FOR STOP 2 (STOPPED STREAM)", []),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
@@ -280,12 +280,16 @@ on_receive_data(Bin, State=#state{request_encoding=Encoding,
     try
         {NewBuffer, Messages} = grpcbox_frame:split(<<Buffer/binary, Bin/binary>>, Encoding),
         lager:warning("GRPCBOX: MESSAGES AFTER SPLIT FRAME: ~p", [Messages]),
-        State1 = lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
-                                     case handle_message(EncodedMessage, StateAcc) of
-                                         {ok, StateAcc1 = #state{}} -> StateAcc1;
-                                         StateAcc1 = #state{} -> StateAcc1
-                                     end
-                             end, State, Messages),
+        State1 = case Messages of
+                     [_ | _] ->
+                         lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
+                                         case handle_message(EncodedMessage, StateAcc) of
+                                             {ok, StateAcc1 = #state{}} -> StateAcc1;
+                                             StateAcc1 = #state{} -> StateAcc1
+                                         end
+                                     end, State, Messages);
+                     [] -> State
+                 end,
         lager:warning("GRPCBOX: ON RECEIVE DATA STATE AFTER FOLD ~p, NEW BUFFER ~p", [State1, NewBuffer]),
         StateT = State1#state{buffer=NewBuffer},
         lager:warning("GRPCBOX: ON RECEIVE DATA OUTGOING STATE ~p, NEW BUFFER ~p", [StateT, NewBuffer]),
