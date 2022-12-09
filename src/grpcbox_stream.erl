@@ -201,16 +201,16 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
         {ok, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
+%%            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-            _ = stop_stream(?STREAM_CLOSED, State2),
+%%            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
+%%            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         E={grpc_error, _} ->
             throw(E);
@@ -241,13 +241,13 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-            _ = stop_stream(?STREAM_CLOSED, State2),
+%%            _ = stop_stream(?STREAM_CLOSED, State2),
             lager:warning("GRPCBOX: RETURNING OK/STATE FOR STOP 1", []),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
+%%            _ = stop_stream(?STREAM_CLOSED, State3),
             lager:warning("GRPCBOX: RETURNING OK/STATE FOR STOP 2 (STOPPED STREAM)", []),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
@@ -316,6 +316,7 @@ handle_message(EncodedMessage, State=#state{ctx=Ctx,
                                                            output={_Output, OutputStream}}}) ->
     try Proto:decode_msg(EncodedMessage, Input) of
         Message ->
+            lager:warning("GRPCBOX: DECODED MESSAGE IS ~p", [Message]),
             State1=#state{ctx=Ctx1} =
                 stats_handler(Ctx, in_payload, #{uncompressed_size => erlang:external_size(Message),
                                                  compressed_size => size(EncodedMessage)}, State),
