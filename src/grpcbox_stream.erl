@@ -279,6 +279,7 @@ on_receive_data(Bin, State=#state{request_encoding=Encoding,
     lager:warning("GRPCBOX: ON RECEIVE DATA INCOMING STATE ~p", [State]),
     try
         {NewBuffer, Messages} = grpcbox_frame:split(<<Buffer/binary, Bin/binary>>, Encoding),
+        lager:warning("GRPCBOX: MESSAGES AFTER SPLIT FRAME: ~p", [Messages]),
         State1 = lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
                                      case handle_message(EncodedMessage, StateAcc) of
                                          {ok, StateAcc1 = #state{}} -> StateAcc1;
