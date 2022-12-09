@@ -276,13 +276,17 @@ on_receive_data(_, State=#state{method=undefined}) ->
     {ok, State};
 on_receive_data(Bin, State=#state{request_encoding=Encoding,
                                   buffer=Buffer}) ->
+    lager:warning("GRPCBOX: ON RECEIVE DATA INCOMING STATE ~p", [State]),
     try
         {NewBuffer, Messages} = grpcbox_frame:split(<<Buffer/binary, Bin/binary>>, Encoding),
         State1 = lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
                                      StateAcc1 = handle_message(EncodedMessage, StateAcc),
                                      StateAcc1
                              end, State, Messages),
-        {ok, State1#state{buffer=NewBuffer}}
+        lager:warning("GRPCBOX: ON RECEIVE DATA STATE AFTER FOLD ~p, NEW BUFFER ~p", [State1, NewBuffer]),
+        StateT = State1#state{buffer=NewBuffer},
+        lager:warning("GRPCBOX: ON RECEIVE DATA OUTGOING STATE ~p, NEW BUFFER ~p", [StateT, NewBuffer]),
+        {ok, StateT}
     catch
         throw:{grpc_error, {Status, Message}} ->
             {ok, State2} = end_stream(Status, Message, State),
