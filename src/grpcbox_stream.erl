@@ -142,14 +142,14 @@ handle_service_lookup(Ctx, [Service, Method], State=#state{services_table=Servic
             handle_auth(Ctx, State1);
         _ ->
             {ok, State1} = end_stream(?GRPC_STATUS_UNIMPLEMENTED, <<"Method not found on server">>, State),
-            _ = stop_stream(?REFUSED_STREAM, State1),
+%%            _ = stop_stream(?REFUSED_STREAM, State1),
             {ok, State1}
     end;
 handle_service_lookup(_, _, State) ->
     State1 = State#state{resp_headers=[{<<":status">>, <<"200">>},
                                        {<<"user-agent">>, <<"grpc-erlang/0.1.0">>}]},
     {ok, State2} = end_stream(?GRPC_STATUS_UNIMPLEMENTED, <<"failed parsing path">>, State1),
-    _ = stop_stream(?REFUSED_STREAM, State2),
+%%    _ = stop_stream(?REFUSED_STREAM, State2),
     {ok, State2}.
 
 handle_auth(_Ctx, State=#state{auth_fun=AuthFun,
@@ -171,7 +171,7 @@ handle_auth(_Ctx, State=#state{auth_fun=AuthFun,
             {ok, State1};
         _ ->
             {ok, State1} = end_stream(?GRPC_STATUS_UNAUTHENTICATED, <<"">>, State),
-            _ = stop_stream(?REFUSED_STREAM, State1),
+%%            _ = stop_stream(?REFUSED_STREAM, State1),
             {ok, State1}
     end.
 
@@ -201,16 +201,16 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
         {ok, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
+%%            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-            _ = stop_stream(?STREAM_CLOSED, State2),
+%%            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
+%%            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         E={grpc_error, _} ->
             throw(E);
@@ -234,32 +234,26 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
                   StreamInterceptor(Ref, State, ServerInfo, fun Module:Function/2)
           end) of
         {ok, State1} ->
-            lager:warning("GRPCBOX: RETURNING STATE", []),
             State1;
         {ok, Response, State1} ->
-            lager:warning("GRPCBOX: RETURNING SEND-FALSE", []),
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-            _ = stop_stream(?STREAM_CLOSED, State2),
-            lager:warning("GRPCBOX: RETURNING OK/STATE FOR STOP 1", []),
+%%            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
-            lager:warning("GRPCBOX: RETURNING OK/STATE FOR STOP 2 (STOPPED STREAM)", []),
+%%            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
             {ok, State1} = end_stream(Status, Message, State),
-            lager:warning("GRPCBOX: GRPC ERROR, []"),
-            _ = stop_stream(?STREAM_CLOSED, State1),
+%%            _ = stop_stream(?STREAM_CLOSED, State1),
             {ok, State1};
         {grpc_extended_error, #{status := Status, message := Message} = ErrorData} ->
             State1 = add_trailers_from_error_data(ErrorData, State),
             {ok, State2} = end_stream(Status, Message, State1),
-            lager:warning("GRPCBOX: GRPC EXTENDED ERROR", []),
-            _ = stop_stream(?STREAM_CLOSED, State2),
+%%            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2}
     end.
 
@@ -276,42 +270,31 @@ on_receive_data(_, State=#state{method=undefined}) ->
     {ok, State};
 on_receive_data(Bin, State=#state{request_encoding=Encoding,
                                   buffer=Buffer}) ->
-    lager:warning("GRPCBOX: ON RECEIVE DATA INCOMING STATE ~p", [State]),
     try
         {NewBuffer, Messages} = grpcbox_frame:split(<<Buffer/binary, Bin/binary>>, Encoding),
-        lager:warning("GRPCBOX: MESSAGES AFTER SPLIT FRAME: ~p", [Messages]),
-        State1 = case Messages of
-                     [_ | _] ->
-                         lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
-                                         case handle_message(EncodedMessage, StateAcc) of
-                                             {ok, StateAcc1 = #state{}} -> StateAcc1;
-                                             StateAcc1 = #state{} -> StateAcc1
-                                         end
-                                     end, State, Messages);
-                     [] -> State
-                 end,
-        lager:warning("GRPCBOX: ON RECEIVE DATA STATE AFTER FOLD ~p, NEW BUFFER ~p", [State1, NewBuffer]),
+        State1 = lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
+                                 case handle_message(EncodedMessage, StateAcc) of
+                                     {ok, StateAcc1 = #state{}} -> StateAcc1;
+                                     StateAcc1 = #state{} -> StateAcc1
+                                 end
+                             end, State, Messages),
         StateT = State1#state{buffer=NewBuffer},
-        lager:warning("GRPCBOX: ON RECEIVE DATA OUTGOING STATE ~p, NEW BUFFER ~p", [StateT, NewBuffer]),
         {ok, StateT}
     catch
         throw:{grpc_error, {Status, Message}} ->
             {ok, State2} = end_stream(Status, Message, State),
             _ = stop_stream(?STREAM_CLOSED, State2),
-            lager:warning("GRPCBOX: CATCH IN ON_RECEIVE_DATA THROW-GRPC-ERROR", []),
             {ok, State2};
         throw:{grpc_extended_error, #{status := Status, message := Message} = ErrorData} ->
             State2 = add_trailers_from_error_data(ErrorData, State),
             {ok, State3} = end_stream(Status, Message, State2),
             _ = stop_stream(?STREAM_CLOSED, State3),
-            lager:warning("GRPCBOX: CATCH IN ON_RECEIVE_DATA THROW-GRPC-ERROR-EXTENDED", []),
             {ok, State3};
         _C:_E:_S ->
             %% if we dont catch exceptions here, it ends up taking the h2 connection down
             %% and thus one stream going down pulls ev thing down
             {ok, State2} = end_stream(?GRPC_STATUS_UNKNOWN, <<>>, State),
             _ = stop_stream(?INTERNAL_ERROR, State2),
-            lager:warning("GRPCBOX: OTHER CATCH IN ON_RECEIVE_DATA: ~p:~p:~p", [_C, _E, _S]),
             {ok, State2}
     end.
 
@@ -321,21 +304,17 @@ handle_message(EncodedMessage, State=#state{ctx=Ctx,
                                                            output={_Output, OutputStream}}}) ->
     try Proto:decode_msg(EncodedMessage, Input) of
         Message ->
-            lager:warning("GRPCBOX: DECODED MESSAGE IS ~p", [Message]),
             State1=#state{ctx=Ctx1} =
                 stats_handler(Ctx, in_payload, #{uncompressed_size => erlang:external_size(Message),
                                                  compressed_size => size(EncodedMessage)}, State),
             case {InputStream, OutputStream} of
                 {false, false} ->
-                    lager:warning("GRPCBOX: HANDLE_MESSAGE FOR UNARY", []),
                     handle_unary(Ctx1, Message, State1);
                 {_, _} ->
-                    lager:warning("GRPCBOX: HANDLE_MESSAGE FOR STREAM", []),
                     handle_streams(Message, State1#state{handler=self()})
             end
     catch
         error:{gpb_error, _} ->
-            lager:warning("GRPCBOX: CAUGHT ERROR IN HANDLE_MESSAGE", []),
             ?THROW(?GRPC_STATUS_INTERNAL, <<"Error parsing request protocol buffer">>)
     end.
 
@@ -394,14 +373,11 @@ stats_handler(Ctx, Event, Stats, State=#state{stats_handler=StatsHandler,
                 stats=StatsState1}.
 
 end_stream(State) ->
-    lager:warning("GRPCBOX: PLEASE CLOSE STREAM", []),
     end_stream(?GRPC_STATUS_OK, <<>>, State).
 
 end_stream(Status, Message, State=#state{headers_sent=false}) ->
-    lager:warning("GRPCBOX: SEND HEADERS AND THEN END", []),
     end_stream(Status, Message, send_headers(State));
 end_stream(_Status, _Message, State=#state{trailers_sent=true}) ->
-    lager:warning("GRPCBOX: JUST END; WE'RE DONE HERE"),
     {ok, State};
 end_stream(Status, Message, State=#state{connection_pid=ConnPid,
                                          stream_id=StreamId,
@@ -413,13 +389,11 @@ end_stream(Status, Message, State=#state{connection_pid=ConnPid,
                                 [{send_end_stream, true}]),
     Ctx1 = ctx:with_value(Ctx, grpc_server_status, grpcbox_utils:status_to_string(Status)),
     State1 = stats_handler(Ctx1, rpc_end, {}, State),
-    lager:warning("GRPCBOX: SEND TRAILERS AND EXIT", []),
     {ok, State1#state{trailers_sent=true}}.
 
 stop_stream(Status, State=#state{ connection_pid=ConnPid,
                                  stream_id=StreamId}) ->
     h2_connection:rst_stream(ConnPid, StreamId, Status),
-    lager:warning("GRPCBOX: STOP H2 STREAM", []),
     {ok, State}.
 
 set_trailers(Ctx, Trailers) ->
@@ -504,11 +478,9 @@ add_trailers(Ctx, Trailers=#{}) ->
     ctx_with_stream(Ctx, State#state{resp_trailers=maps:to_list(Trailers) ++ RespTrailers}).
 
 update_headers(Headers, State=#state{resp_headers=RespHeaders}) ->
-    lager:warning("GRPCBOX: UPDATING HEADERS", []),
     State#state{resp_headers=RespHeaders ++ Headers}.
 
 update_trailers(Trailers, State=#state{resp_trailers=RespTrailers}) ->
-    lager:warning("GRPCBOX: UPDATING TRAILERS", []),
     State#state{resp_trailers=RespTrailers ++ Trailers}.
 
 send(End, Message, State=#state{headers_sent=false}) ->
@@ -524,7 +496,6 @@ send(End, Message, State=#state{ctx=Ctx,
     BodyToSend = Proto:encode_msg(Message, Output),
     OutFrame = grpcbox_frame:encode(Encoding, BodyToSend),
     ok = h2_connection:send_body(ConnPid, StreamId, OutFrame, [{send_end_stream, End}]),
-    lager:warning("GRPCBOX: SENDING BODY MESSAGE", []),
     stats_handler(Ctx, out_payload, #{uncompressed_size => erlang:external_size(Message),
                                       compressed_size => size(BodyToSend)}, State).
 
