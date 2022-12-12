@@ -142,14 +142,12 @@ handle_service_lookup(Ctx, [Service, Method], State=#state{services_table=Servic
                                  method=M},
             handle_auth(Ctx, State1);
         _ ->
-            {ok, State1} = end_stream(?GRPC_STATUS_UNIMPLEMENTED, <<"Method not found on server">>, State),
-            {ok, State1}
+            end_stream(?GRPC_STATUS_UNIMPLEMENTED, <<"Method not found on server">>, State)
     end;
 handle_service_lookup(_, _, State) ->
     State1 = State#state{resp_headers=[{<<":status">>, <<"200">>},
                                        {<<"user-agent">>, <<"grpc-erlang/0.1.0">>}]},
-    {ok, State2} = end_stream(?GRPC_STATUS_UNIMPLEMENTED, <<"failed parsing path">>, State1),
-    {ok, State2}.
+    end_stream(?GRPC_STATUS_UNIMPLEMENTED, <<"failed parsing path">>, State1).
 
 handle_auth(_Ctx, State=#state{auth_fun=AuthFun,
                                socket=Socket,
@@ -170,6 +168,7 @@ handle_auth(_Ctx, State=#state{auth_fun=AuthFun,
             {ok, State1};
         _ ->
             {ok, State1} = end_stream(?GRPC_STATUS_UNAUTHENTICATED, <<"">>, State),
+            _ = stop_stream(?REFUSED_STREAM, State1),
             {ok, State1}
     end.
 
@@ -199,6 +198,7 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
         {ok, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
+            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
@@ -241,10 +241,12 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             {ok, State3};
         {grpc_error, {Status, Message}} ->
             {ok, State1} = end_stream(Status, Message, State),
+            _ = stop_stream(?STREAM_CLOSED, State1),
             {ok, State1};
         {grpc_extended_error, #{status := Status, message := Message} = ErrorData} ->
             State1 = add_trailers_from_error_data(ErrorData, State),
             {ok, State2} = end_stream(Status, Message, State1),
+            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2}
     end.
 
