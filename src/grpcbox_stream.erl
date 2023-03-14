@@ -206,12 +206,10 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         E={grpc_error, _} ->
             throw(E);
@@ -240,12 +238,10 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
-            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
-            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
             {ok, State1} = end_stream(Status, Message, State),
@@ -274,8 +270,10 @@ on_receive_data(Bin, State=#state{request_encoding=Encoding,
     try
         {NewBuffer, Messages} = grpcbox_frame:split(<<Buffer/binary, Bin/binary>>, Encoding),
         State1 = lists:foldl(fun(EncodedMessage, StateAcc=#state{}) ->
-                                     StateAcc1 = handle_message(EncodedMessage, StateAcc),
-                                     StateAcc1
+                                case handle_message(EncodedMessage, StateAcc) of
+                                    {ok, StateAcc1 = #state{}} -> StateAcc1;
+                                    StateAcc1 = #state{} -> StateAcc1
+                                end
                              end, State, Messages),
         {ok, State1#state{buffer=NewBuffer}}
     catch
