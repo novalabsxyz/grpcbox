@@ -50,7 +50,7 @@
                 services_table          :: ets:tid(),
                 req_headers=[]          :: list(),
                 full_method             :: binary() | undefined,
-                connection_pid          :: pid(),
+                connection_pid          :: h2_stream_set:stream_set(),
                 request_encoding        :: gzip | identity | undefined,
                 response_encoding       :: gzip | identity | undefined,
                 content_type            :: proto | json | undefined,

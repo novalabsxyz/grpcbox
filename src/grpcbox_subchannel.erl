@@ -19,7 +19,7 @@
                          encoding := grpcbox:encoding(),
                          stats_handler := module() | undefined
                         },
-               conn :: pid() | undefined,
+               conn :: h2_stream_set:stream_set() | undefined,
                idle_interval :: timer:time()}).
 
 start_link(Name, Channel, Endpoint, Encoding, StatsHandler) ->
@@ -101,7 +101,7 @@ connect(Data=#data{conn=undefined,
         {error, _}=Error ->
             {next_state, disconnected, Data#data{conn=undefined}, [{reply, From, Error}]}
     end;
-connect(Data=#data{conn=Pid}, From, Actions) when is_pid(Pid) ->
+connect(Data=#data{conn=Pid}, From, Actions) when Pid /= undefined ->
     h2_connection:stop(Pid),
     connect(Data#data{conn=undefined}, From, Actions).
 

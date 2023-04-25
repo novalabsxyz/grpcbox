@@ -52,11 +52,10 @@ new_stream(Ctx, Channel, Path, Def=#grpcbox_def{service=Service,
                                                             stats_handler => StatsHandler,
                                                             stats => #{},
                                                             callback_module => Callback,
-                                                            client_pid => self()}], self()) of
+                                                            client_pid => self()}], RequestHeaders, [], self()) of
                 {error, _Code} = Err ->
                     Err;
                 {StreamId, Pid} ->
-                    h2_connection:send_headers(Conn, StreamId, RequestHeaders),
                     Ref = erlang:monitor(process, Pid),
                     {ok, #{channel => Conn,
                            stream_id => StreamId,
@@ -95,11 +94,10 @@ send_request(Ctx, Channel, Path, Input, #grpcbox_def{service=Service,
                                                                           stats_handler => StatsHandler,
                                                                           stats => #{},
                                                                           callback_module => Callback,
-                                                                          client_pid => self()}], Headers, [], self()) of
+                                                                          client_pid => self()}], Headers, Body, [], self()) of
                 {error, _Code} = Err ->
                     Err;
                 {StreamId, Pid} ->
-                    h2_connection:send_body(Conn, StreamId, Body),
                     {ok, Conn, StreamId, Pid}
             end;
         {error, _}=Error ->
