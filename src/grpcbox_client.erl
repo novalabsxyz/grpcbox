@@ -28,7 +28,8 @@
 
 -type options() :: #{channel => grpcbox_channel:t(),
                      encoding => grpcbox:encoding(),
-                     callback_module => {module(), any()}}.
+                     callback_module => {module(), any()},
+                     rcv_timeout => non_neg_integer()}.
 
 -type unary_interceptor() :: term().
 -type stream_interceptor() :: term().
@@ -84,7 +85,7 @@ unary_handler(Ctx, Channel, Path, Input, Def, Options) ->
                       stream_pid => Pid,
                       monitor_ref => Ref,
                       service_def => Def},
-                case recv_end(S, 5000) of
+                case recv_end(S, maps:get(rcv_timeout, Options, 5000)) of
                     eos ->
                         {ok, Headers} = recv_headers(S, 0),
                         case recv_trailers(S) of
