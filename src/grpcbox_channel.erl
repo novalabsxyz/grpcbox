@@ -66,8 +66,6 @@ pick(Name, CallType, Acc) ->
         case gproc_pool:pick(Name) of
             false -> {error, no_endpoints};
             GProcName ->
-                {n,l,[gproc_pool,_,_,LocalName]} = GProcName,
-                ct:pal("local name is ~p", [LocalName]),
                 Pid = gproc:where(GProcName),
                 case application:get_env(grpcbox, max_client_streams, undefined) of
                     undefined ->
@@ -76,31 +74,37 @@ pick(Name, CallType, Acc) ->
                         %% TODO is there a better way to go from a global gproc
                         %% name to a local one?
                         {n,l,[gproc_pool,_,_,LocalName]} = GProcName,
-                        case lists:member(Acc, LocalName) of
+                        case lists:member(LocalName, Acc) andalso length(lists:usort(Acc)) == length(gproc_pool:active_workers(Name)) of
                             true ->
                                 %% we've checked all the workers, and they're all full
                                 %% time to start another one
-                                NewCount = lists:max([C || {_Transport, _Host, _Port, _SSLOpts, C} <- Acc]),
-                                ct:pal("starting a new worker ~p", [NewCount]),
+                                Workers = gproc_pool:active_workers(Name),
+                                NewCount = lists:max([C || {{_Transport, _Host, _Port, _SSLOpts, C}, _Pid} <- Workers]) + 1,
                                 %% TODO if there's multiple hosts defined, maybe pick the 
                                 %% one with the lowest count?
                                 {Transport, Host, Port, SSLOptions, _} = LocalName,
                                 NewName = {Transport, Host, Port, SSLOptions, NewCount},
                                 {ok, _Conn, #{encoding := Encoding, stats_handler := StatsHandler}} = grpcbox_subchannel:conn(Pid),
-                                gproc_pool:add_worker(Name, NewName),
-                                {ok, NewPid} = grpcbox_subchannel:start_link(NewName, Name,
-                                                                          {Transport, Host, Port, SSLOptions},
-                                                                          Encoding, StatsHandler),
-                                {ok, {NewPid, interceptor(Name, CallType)}};
+                                try gproc_pool:add_worker(Name, NewName) of
+                                    _ ->
+                                        {ok, NewPid} = grpcbox_subchannel:start_link(NewName, Name,
+                                                                                     {Transport, Host, Port, SSLOptions},
+                                                                                     Encoding, StatsHandler),
+                                        {ok, {NewPid, interceptor(Name, CallType)}}
+                                catch
+                                    error:exists ->
+                                        %% race to create it
+                                        NewPid = gproc:where(GProcName),
+                                        {ok, {Pid, interceptor(Name, CallType)}}
+                                end;
                             false ->
                                 {ok, Conn, _Info} = grpcbox_subchannel:conn(Pid),
                                 ActiveCount = h2_stream_set:my_active_count(Conn),
-                                ct:pal("active count for ~p is ~p", [LocalName, ActiveCount]),
                                 case ActiveCount >= MaxCount of
                                     true ->
                                         %% this stream is overloaded
                                         %% try to find another one
-                                        pick(Name, CallType, [LocalName|Acc]);
+                                        pick(Name, CallType, lists:usort([LocalName|Acc]));
                                     false ->
                                         {ok, {Pid, interceptor(Name, CallType)}}
                                 end
@@ -108,8 +112,8 @@ pick(Name, CallType, Acc) ->
                 end
         end
     catch
-        error:badarg ->
-            {error, undefined_channel}
+        error:badarg:Stack ->
+            {error, {undefined_channel, Stack}}
     end.
 
 -spec interceptor(name(), unary | stream) -> grpcbox_client:interceptor() | undefined.
