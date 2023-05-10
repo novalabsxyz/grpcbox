@@ -93,6 +93,7 @@ pick(Name, CallType, Acc) ->
                             false ->
                                 {ok, Conn, _Info} = grpcbox_subchannel:conn(Pid),
                                 ActiveCount = h2_stream_set:my_active_count(Conn),
+                                ct:pal("active count for ~p is ~p", [LocalName, ActiveCount]),
                                 case ActiveCount >= MaxCount of
                                     true ->
                                         %% this stream is overloaded
