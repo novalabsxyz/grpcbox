@@ -20,7 +20,8 @@
 -type name() :: t().
 -type transport() :: http | https.
 -type host() :: inet:ip_address() | inet:hostname().
--type endpoint() :: {transport(), host(), inet:port_number(), ssl:ssl_option()}.
+-type endpoint() :: {transport(), host(), inet:port_number(), ssl:ssl_option()} | %% old style, no connection count
+                    {transport(), host(), inet:port_number(), ssl:ssl_option(), pos_integer()}. %% with connection count
 
 -type options() :: #{balancer => load_balancer(),
                      encoding => gprcbox:encoding(),
@@ -56,12 +57,52 @@ is_ready(Name) ->
 %% @doc Picks a subchannel from a pool using the configured strategy.
 -spec pick(name(), unary | stream) -> {ok, {pid(), grpcbox_client:interceptor() | undefined}} |
                                    {error, undefined_channel | no_endpoints}.
+
 pick(Name, CallType) ->
+    pick(Name, CallType, []).
+
+pick(Name, CallType, Acc) ->
     try
-        case gproc_pool:pick_worker(Name) of
+        case gproc_pool:pick(Name) of
             false -> {error, no_endpoints};
-            Pid when is_pid(Pid) ->
-                {ok, {Pid, interceptor(Name, CallType)}}
+            GProcName ->
+                Pid = gproc:where(GProcName),
+                case application:get_env(grpcbox, max_client_streams, undefined) of
+                    undefined ->
+                        {ok, {Pid, interceptor(Name, CallType)}};
+                    MaxCount when is_integer(MaxCount) ->
+                        %% TODO is there a better way to go from a global gproc
+                        %% name to a local one?
+                        {n,l,[gproc_pool,_,_,LocalName]} = GProcName,
+                        case lists:member(Acc, LocalName) of
+                            true ->
+                                %% we've checked all the workers, and they're all full
+                                %% time to start another one
+                                NewCount = lists:max([C || {_Transport, _Host, _Port, _SSLOpts, C} <- Acc]),
+                                ct:pal("starting a new worker ~p", [NewCount]),
+                                %% TODO if there's multiple hosts defined, maybe pick the 
+                                %% one with the lowest count?
+                                {Transport, Host, Port, SSLOptions, _} = LocalName,
+                                NewName = {Transport, Host, Port, SSLOptions, NewCount},
+                                {ok, _Conn, #{encoding := Encoding, stats_handler := StatsHandler}} = grpcbox_subchannel:conn(Pid),
+                                gproc_pool:add_worker(Name, NewName),
+                                {ok, NewPid} = grpcbox_subchannel:start_link(NewName, Name,
+                                                                          {Transport, Host, Port, SSLOptions},
+                                                                          Encoding, StatsHandler),
+                                {ok, {NewPid, interceptor(Name, CallType)}};
+                            false ->
+                                {ok, Conn, _Info} = grpcbox_subchannel:conn(Pid),
+                                ActiveCount = h2_stream_set:my_active_count(Conn),
+                                case ActiveCount >= MaxCount of
+                                    true ->
+                                        %% this stream is overloaded
+                                        %% try to find another one
+                                        pick(Name, CallType, [LocalName|Acc]);
+                                    false ->
+                                        {ok, {Pid, interceptor(Name, CallType)}}
+                                end
+                        end
+                end
         end
     catch
         error:badarg ->
@@ -80,8 +121,17 @@ interceptor(Name, CallType) ->
 stop(Name) ->
     gen_statem:stop(?CHANNEL(Name)).
 
-init([Name, Endpoints, Options]) ->
+init([Name, Endpoints0, Options]) ->
     process_flag(trap_exit, true),
+
+    Endpoints = lists:map(fun({Transport, Host, Port, SSLOptions}) ->
+                                  %% legacy endpoints have 1 worker
+                                  {Transport, Host, Port, SSLOptions, 1};
+                             ({Transport, Host, Port, SSLOptions, Count}) ->
+                                  {Transport, Host, Port, SSLOptions, Count}
+                          end, Endpoints0),
+
+    WorkerCount = lists:sum([Count || {_, _, _, _, Count} <- Endpoints ]),
 
     BalancerType = maps:get(balancer, Options, round_robin),
     Encoding = maps:get(encoding, Options, identity),
@@ -89,7 +139,7 @@ init([Name, Endpoints, Options]) ->
 
     insert_interceptors(Name, Options),
 
-    gproc_pool:new(Name, BalancerType, [{size, length(Endpoints)},
+    gproc_pool:new(Name, BalancerType, [{size, WorkerCount},
                                         {auto_size, true}]),
     Data = #data{
         pool = Name,
@@ -163,10 +213,14 @@ insert_stream_interceptor(Name, _Type, Interceptors) ->
     end.
 
 start_workers(Pool, StatsHandler, Encoding, Endpoints) ->
-    [begin
-         gproc_pool:add_worker(Pool, Endpoint),
-         {ok, Pid} = grpcbox_subchannel:start_link(Endpoint, Pool, {Transport, Host, Port, SSLOptions},
-             Encoding, StatsHandler),
-         Pid
-     end || Endpoint={Transport, Host, Port, SSLOptions} <- Endpoints].
+    [lists:foreach(
+       fun(I) ->
+               Name = {Transport, Host, Port, SSLOptions, I},
+               gproc_pool:add_worker(Pool, Name),
+               {ok, Pid} = grpcbox_subchannel:start_link(Name, Pool,
+                                                         {Transport, Host, Port, SSLOptions},
+                                                         Encoding, StatsHandler),
+               Pid
+       end,
+       lists:seq(1, Count)) || {Transport, Host, Port, SSLOptions, Count} <- Endpoints].
 
