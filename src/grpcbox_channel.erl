@@ -66,6 +66,8 @@ pick(Name, CallType, Acc) ->
         case gproc_pool:pick(Name) of
             false -> {error, no_endpoints};
             GProcName ->
+                {n,l,[gproc_pool,_,_,LocalName]} = GProcName,
+                ct:pal("local name is ~p", [LocalName]),
                 Pid = gproc:where(GProcName),
                 case application:get_env(grpcbox, max_client_streams, undefined) of
                     undefined ->
