@@ -95,7 +95,7 @@ pick(Name, CallType, Acc) ->
                                     error:exists ->
                                         %% race to create it
                                         NewPid = gproc:where(GProcName),
-                                        {ok, {Pid, interceptor(Name, CallType)}}
+                                        {ok, {NewPid, interceptor(Name, CallType)}}
                                 end;
                             false ->
                                 {ok, Conn, _Info} = grpcbox_subchannel:conn(Pid),

@@ -3,8 +3,7 @@
 -behaviour(gen_statem).
 
 -export([start_link/5,
-         conn/1,
-        stream_count/1]).
+         conn/1]).
 -export([init/1,
          callback_mode/0,
          terminate/3,
@@ -29,9 +28,6 @@ start_link(Name, Channel, Endpoint, Encoding, StatsHandler) ->
 
 conn(Pid) ->
     gen_statem:call(Pid, conn).
-
-stream_count(Pid) ->
-    gen_statem:call(Pid, stream_count).
 
 init([Name, Channel, Endpoint, Encoding, StatsHandler]) ->
     process_flag(trap_exit, true),
