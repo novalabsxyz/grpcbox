@@ -5,7 +5,7 @@
   0},
  {<<"chatterbox">>,
   {git,"https://github.com/novalabsxyz/chatterbox",
-       {ref,"26fc953ec71bd2c5fa4efa8bf1d3a9a5bf1c2435"}},
+       {ref,"b083f281873acf53f5a353c9450f7a6f0b98b1d6"}},
   0},
  {<<"ctx">>,{pkg,<<"ctx">>,<<"0.6.0">>},0},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.8.0">>},0},
