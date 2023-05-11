@@ -69,13 +69,20 @@ pick(Name, CallType, Acc) ->
                 Pid = gproc:where(GProcName),
                 case application:get_env(grpcbox, max_client_streams, undefined) of
                     undefined ->
+                        
                         {ok, {Pid, interceptor(Name, CallType)}};
                     MaxCount when is_integer(MaxCount) ->
+                        
                         %% TODO is there a better way to go from a global gproc
                         %% name to a local one?
                         {n,l,[gproc_pool,_,_,LocalName]} = GProcName,
                         case lists:member(LocalName, Acc) andalso length(lists:usort(Acc)) == length(gproc_pool:active_workers(Name)) of
                             true ->
+                                ChannelPid = 
+                                    case gproc:lookup_local_name({?MODULE, Name}) of
+                                        P when is_pid(P) ->
+                                            P
+                                    end,
                                 %% we've checked all the workers, and they're all full
                                 %% time to start another one
                                 Workers = gproc_pool:active_workers(Name),
@@ -84,28 +91,26 @@ pick(Name, CallType, Acc) ->
                                 %% one with the lowest count?
                                 {Transport, Host, Port, SSLOptions, _} = LocalName,
                                 NewName = {Transport, Host, Port, SSLOptions, NewCount},
-                                {ok, _Conn, #{encoding := Encoding, stats_handler := StatsHandler}} = grpcbox_subchannel:conn(Pid),
-                                try gproc_pool:add_worker(Name, NewName) of
-                                    _ ->
-                                        {ok, NewPid} = grpcbox_subchannel:start_link(NewName, Name,
-                                                                                     {Transport, Host, Port, SSLOptions},
-                                                                                     Encoding, StatsHandler),
-                                        {ok, {NewPid, interceptor(Name, CallType)}}
-                                catch
-                                    error:exists ->
-                                        %% race to create it
+                                
+                                case gen_statem:call(ChannelPid, {start_worker, NewName}) of
+                                    WorkerPid when is_pid(WorkerPid) ->
+                                        {ok, {WorkerPid, interceptor(Name, CallType)}};
+                                    exists ->
                                         NewPid = gproc:where(GProcName),
                                         {ok, {NewPid, interceptor(Name, CallType)}}
                                 end;
                             false ->
                                 {ok, Conn, _Info} = grpcbox_subchannel:conn(Pid),
                                 ActiveCount = h2_stream_set:my_active_count(Conn),
+                                
                                 case ActiveCount >= MaxCount of
                                     true ->
+                                        
                                         %% this stream is overloaded
                                         %% try to find another one
                                         pick(Name, CallType, lists:usort([LocalName|Acc]));
                                     false ->
+                                         
                                         {ok, {Pid, interceptor(Name, CallType)}}
                                 end
                         end
@@ -182,6 +187,26 @@ idle({call, From}, is_ready, _Data) ->
 idle(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, Data).
 
+handle_event(
+    {call, From},
+    {start_worker, {Transport, Host, Port, SSLOptions, _Count}=NewName},
+    #data{pool=Name, stats_handler=StatsHandler, encoding=Encoding}
+) ->
+    try gproc_pool:add_worker(Name, NewName) of
+        _ ->
+            
+            {ok, NewPid} = grpcbox_subchannel:start_link(NewName, Name,
+                                                        {Transport, Host, Port, SSLOptions},
+                                                        Encoding, StatsHandler),
+            
+            {ok, _, _} = grpcbox_subchannel:conn(NewPid),
+            
+            {keep_state_and_data, [{reply, From, NewPid}]}
+    catch
+        error:exists ->
+            
+            {keep_state_and_data, [{reply, From, exists}]}
+    end;
 handle_event(_, _, Data) ->
     {keep_state, Data}.
 
