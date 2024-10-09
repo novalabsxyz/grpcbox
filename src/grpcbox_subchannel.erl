@@ -19,7 +19,8 @@
                          encoding := grpcbox:encoding(),
                          stats_handler := module() | undefined
                         },
-               conn :: pid() | undefined,
+               conn :: h2_stream_set:stream_set() | undefined,
+               conn_pid :: pid() | undefined,
                idle_interval :: timer:time()}).
 
 start_link(Name, Channel, Endpoint, Encoding, StatsHandler) ->
@@ -68,9 +69,9 @@ disconnected(EventType, EventContent, Data) ->
 
 handle_event({call, From}, info, #data{info=Info}) ->
     {keep_state_and_data, [{reply, From, Info}]};
-handle_event(info, {'EXIT', Pid, _}, Data=#data{conn=Pid}) ->
-    {next_state, disconnected, Data#data{conn=undefined}};
-handle_event(info, {'EXIT', _, econnrefused}, #data{conn=undefined}) ->
+handle_event(info, {'EXIT', Pid, _}, Data=#data{conn_pid=Pid}) ->
+    {next_state, disconnected, Data#data{conn=undefined, conn_pid=undefined}};
+handle_event(info, {'EXIT', _, econnrefused}, #data{conn=undefined, conn_pid=undefined}) ->
     keep_state_and_data;
 handle_event({call, From}, shutdown, _) ->
     {stop_and_reply, normal, {reply, From, ok}};
@@ -96,12 +97,13 @@ connect(Data=#data{conn=undefined,
     case h2_client:start_link(Transport, Host, Port, options(Transport, SSLOptions),
                              #{garbage_on_end => true,
                                stream_callback_mod => grpcbox_client_stream}) of
-        {ok, Pid} ->
-            {next_state, ready, Data#data{conn=Pid}, Actions};
+        {ok, Conn} ->
+            Pid = h2_stream_set:connection(Conn),
+            {next_state, ready, Data#data{conn=Conn, conn_pid=Pid}, Actions};
         {error, _}=Error ->
             {next_state, disconnected, Data#data{conn=undefined}, [{reply, From, Error}]}
     end;
-connect(Data=#data{conn=Pid}, From, Actions) when is_pid(Pid) ->
+connect(Data=#data{conn=Pid}, From, Actions) when Pid /= undefined ->
     h2_connection:stop(Pid),
     connect(Data#data{conn=undefined}, From, Actions).
 

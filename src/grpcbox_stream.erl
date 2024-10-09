@@ -50,7 +50,7 @@
                 services_table          :: ets:tid(),
                 req_headers=[]          :: list(),
                 full_method             :: binary() | undefined,
-                connection_pid          :: pid(),
+                connection_pid          :: h2_stream_set:stream_set(),
                 request_encoding        :: gzip | identity | undefined,
                 response_encoding       :: gzip | identity | undefined,
                 content_type            :: proto | json | undefined,
@@ -206,10 +206,12 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             {ok, State3};
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
+            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
+            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         E={grpc_error, _} ->
             throw(E);
@@ -238,10 +240,12 @@ handle_streams(Ref, State=#state{full_method=FullMethod,
             send(false, Response, State1);
         {stop, State1} ->
             {ok, State2} = end_stream(State1),
+            _ = stop_stream(?STREAM_CLOSED, State2),
             {ok, State2};
         {stop, Response, State1} ->
             State2 = send(false, Response, State1),
             {ok, State3} = end_stream(State2),
+            _ = stop_stream(?STREAM_CLOSED, State3),
             {ok, State3};
         {grpc_error, {Status, Message}} ->
             {ok, State1} = end_stream(Status, Message, State),

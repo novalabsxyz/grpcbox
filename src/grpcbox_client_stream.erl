@@ -13,6 +13,14 @@
 
 -include("grpcbox.hrl").
 
+-type client_stream_callback_data() :: term().
+
+-callback(init(ClientPid::pid(), StreamId::non_neg_integer(), term()) -> {ok, client_stream_callback_data()}).
+-callback(handle_message(Message::term(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+-callback(handle_headers(Metadata::map(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+-callback(handle_trailers(Status::binary(), Message::term(), Metadata::map(), client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+-callback(handle_eos(client_stream_callback_data()) -> {ok, client_stream_callback_data()}).
+
 -define(headers(Scheme, Host, Path, Encoding, MessageType, MD), [{<<":method">>, <<"POST">>},
                                                                  {<<":path">>, Path},
                                                                  {<<":scheme">>, Scheme},
@@ -33,6 +41,7 @@ new_stream(Ctx, Channel, Path, Def=#grpcbox_def{service=Service,
                      encoding := DefaultEncoding,
                      stats_handler := StatsHandler}} ->
             Encoding = maps:get(encoding, Options, DefaultEncoding),
+            Callback = callback_module(Options),
             RequestHeaders = ?headers(Scheme, Authority, Path, encoding_to_binary(Encoding),
                                       MessageType, metadata_headers(Ctx)),
             case h2_connection:new_stream(Conn, ?MODULE, [#{service => Service,
@@ -42,11 +51,11 @@ new_stream(Ctx, Channel, Path, Def=#grpcbox_def{service=Service,
                                                             buffer => <<>>,
                                                             stats_handler => StatsHandler,
                                                             stats => #{},
-                                                            client_pid => self()}], self()) of
+                                                            callback_module => Callback,
+                                                            client_pid => self()}], RequestHeaders, [], self()) of
                 {error, _Code} = Err ->
                     Err;
                 {StreamId, Pid} ->
-                    h2_connection:send_headers(Conn, StreamId, RequestHeaders),
                     Ref = erlang:monitor(process, Pid),
                     {ok, #{channel => Conn,
                            stream_id => StreamId,
@@ -69,6 +78,7 @@ send_request(Ctx, Channel, Path, Input, #grpcbox_def{service=Service,
                      encoding := DefaultEncoding,
                      stats_handler := StatsHandler}} ->
             Encoding = maps:get(encoding, Options, DefaultEncoding),
+            Callback = callback_module(Options),
             Body = grpcbox_frame:encode(Encoding, MarshalFun(Input)),
             Headers = ?headers(Scheme, Authority, Path, encoding_to_binary(Encoding), MessageType, metadata_headers(Ctx)),
 
@@ -76,18 +86,18 @@ send_request(Ctx, Channel, Path, Input, #grpcbox_def{service=Service,
             %% concurrent calls can't end up interleaving the sending of headers in such
             %% a way that a lower stream id's headers are sent after another's, which results
             %% in the server closing the connection when it gets them out of order
-            case h2_connection:new_stream(Conn, grpcbox_client_stream, [#{service => Service,
+            case h2_connection:new_stream(Conn, ?MODULE, [#{service => Service,
                                                                           marshal_fun => MarshalFun,
                                                                           unmarshal_fun => UnMarshalFun,
                                                                           path => Path,
                                                                           buffer => <<>>,
                                                                           stats_handler => StatsHandler,
                                                                           stats => #{},
-                                                                          client_pid => self()}], Headers, [], self()) of
+                                                                          callback_module => Callback,
+                                                                          client_pid => self()}], Headers, Body, [], self()) of
                 {error, _Code} = Err ->
                     Err;
                 {StreamId, Pid} ->
-                    h2_connection:send_body(Conn, StreamId, Body),
                     {ok, Conn, StreamId, Pid}
             end;
         {error, _}=Error ->
@@ -136,69 +146,100 @@ metadata_headers(Ctx) ->
 
 %% callbacks
 
-init(_ConnectionPid, StreamId, [_, State=#{path := Path}]) ->
+init(ConnectionPid, StreamId, [_, State=#{path := Path, callback_module := {CallbackModule, CallbackInitArgs}}]) ->
     _ = process_flag(trap_exit, true),
     Ctx1 = ctx:with_value(ctx:new(), grpc_client_method, Path),
     State1 = stats_handler(Ctx1, rpc_begin, {}, State),
-    {ok, State1#{stream_id => StreamId}};
+    {ok, CallbackData} = init_stream_callback(CallbackModule, CallbackInitArgs, ConnectionPid, StreamId), 
+    {ok, State1#{stream_id => StreamId, callback_data => CallbackData}};
 init(_, _, State) ->
     {ok, State}.
 
 on_receive_headers(H, State=#{resp_headers := _,
-                              ctx := Ctx,
-                              stream_id := StreamId,
-                              client_pid := Pid}) ->
+                              ctx := Ctx} = State) ->
     Status = proplists:get_value(<<"grpc-status">>, H, undefined),
     Message = proplists:get_value(<<"grpc-message">>, H, undefined),
     Metadata = grpcbox_utils:headers_to_metadata(H),
-    Pid ! {trailers, StreamId, {Status, Message, Metadata}},
+    State1 = handle_trailers_stream_callback(Status, Message, Metadata, State),
     Ctx1 = ctx:with_value(Ctx, grpc_client_status, grpcbox_utils:status_to_string(Status)),
-    {ok, State#{ctx => Ctx1,
+    {ok, State1#{ctx := Ctx1,
                 resp_trailers => H}};
-on_receive_headers(H, State=#{stream_id := StreamId,
-                              ctx := Ctx,
-                              client_pid := Pid}) ->
+on_receive_headers(H, State=#{ctx := Ctx} = State) ->
     Encoding = proplists:get_value(<<"grpc-encoding">>, H, identity),
     Metadata = grpcbox_utils:headers_to_metadata(H),
-    Pid ! {headers, StreamId, Metadata},
+
+    State1 = handle_headers_stream_callback(Metadata, State),
     %% TODO: better way to know if it is a Trailers-Only response?
     %% maybe chatterbox should include information about the end of the stream
     case proplists:get_value(<<"grpc-status">>, H, undefined) of
         undefined ->
-            {ok, State#{resp_headers => H,
+            {ok, State1#{resp_headers => H,
                         encoding => encoding_to_atom(Encoding)}};
         Status ->
             Message = proplists:get_value(<<"grpc-message">>, H, undefined),
-            Pid ! {trailers, StreamId, {Status, Message, Metadata}},
+            State2 = handle_trailers_stream_callback(Status, Message, Metadata, State),
             Ctx1 = ctx:with_value(Ctx, grpc_client_status, grpcbox_utils:status_to_string(Status)),
-            {ok, State#{resp_headers => H,
+            {ok, State2#{resp_headers => H,
                         ctx => Ctx1,
                         status => Status,
                         encoding => encoding_to_atom(Encoding)}}
     end.
 
-on_receive_data(Data, State=#{stream_id := StreamId,
-                              client_pid := Pid,
-                              buffer := Buffer,
-                              encoding := Encoding,
-                              unmarshal_fun := UnmarshalFun}) ->
+on_receive_data(Data, State=#{buffer := Buffer,
+                              encoding := Encoding} = State) ->
     {Remaining, Messages} = grpcbox_frame:split(<<Buffer/binary, Data/binary>>, Encoding),
-    [Pid ! {data, StreamId, UnmarshalFun(Message)} || Message <- Messages],
-    {ok, State#{buffer => Remaining}};
+    State1 = handle_message_stream_callback(Messages, State),
+    {ok, State1#{buffer => Remaining}};
 on_receive_data(_Data, State) ->
     {ok, State}.
 
-on_end_stream(State=#{stream_id := StreamId,
-                      ctx := Ctx,
-                      client_pid := Pid}) ->
-    Pid ! {eos, StreamId},
-    State1 = stats_handler(Ctx, rpc_end, {}, State),
-    {ok, State1}.
+on_end_stream(State=#{ctx := Ctx}) ->
+    State1 = handle_eos_stream_callback(State),
+    State2 = stats_handler(Ctx, rpc_end, {}, State1),
+    {ok, State2}.
 
 handle_info(_, State) ->
     State.
 
 %%
+
+callback_module(#{callback_module := CallbackModule}) ->
+    CallbackModule;
+callback_module(_) ->
+    {grpcbox_client_stream_callback, #{client_pid => self()}}.
+
+init_stream_callback(CallbackModule, CallbackInitArgs, ConnectionPid, StreamId) ->
+    CallbackModule:init(ConnectionPid, StreamId, CallbackInitArgs).
+
+handle_message_stream_callback(Messages, State) ->
+    #{unmarshal_fun := UnmarshalFun,
+      callback_module := {CallbackModule, _},
+      callback_data := CallbackData} = State,
+    CallbackData1 = lists:foldl(
+                        fun(M, D) ->
+                            {ok, D1} = CallbackModule:handle_message(UnmarshalFun(M), D),
+                            D1
+                        end, CallbackData, Messages),
+    State#{callback_data := CallbackData1}.
+
+handle_trailers_stream_callback(Status, Message, Metadata, State) ->
+    #{callback_module := {CallbackModule, _},
+      callback_data := CallbackData} = State,
+    {ok, NewCallbackData} = CallbackModule:handle_trailers(Status, Message, Metadata, CallbackData),
+    State#{callback_data := NewCallbackData}.
+
+handle_headers_stream_callback(Metadata, State) ->
+    #{callback_module := {CallbackModule, _},
+      callback_data := CallbackData} = State,
+    {ok, NewCallbackData} = CallbackModule:handle_headers(Metadata, CallbackData),
+    State#{callback_data := NewCallbackData}.
+
+handle_eos_stream_callback(State) ->
+    #{callback_module := {CallbackModule, _},
+      callback_data := CallbackData} = State,
+    {ok, NewCallbackData} = CallbackModule:handle_eos(CallbackData),
+    State#{callback_data := NewCallbackData}.
+
 
 stats_handler(Ctx, _, _, State=#{stats_handler := undefined}) ->
     State#{ctx => Ctx};
